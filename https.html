@@ -1,0 +1,199 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+	<title>Camera</title>
+	<style>
+	#video-show, #canvas{
+		display: none;
+	}
+	.capture{
+		display: none;
+	}
+	.capture img{
+		max-width: 100px;
+	}
+	</style>
+	<script>
+	function startMonitor (videoShow, videoList, audioList, fn) {
+		navigator.mediaDevices.enumerateDevices().then(function (deviceInfo) {
+			deviceInfo.forEach(function (t) {
+				var mediaInput = document.createElement("option");
+				mediaInput.setAttribute("value", t.deviceId);
+				mediaInput.text = t.label;
+
+				if (t.kind == "videoinput") {
+					videoList.appendChild(mediaInput);
+				} else if (t.kind == "audioinput") {
+					audioList.appendChild(mediaInput);
+				}
+			});
+
+			//todo 需要回溯作用域链
+			return new Promise(function name1 (resolve, reject) {
+				navigator.webkitGetUserMedia({
+					video: {
+						mandatory: {
+							sourceId: videoList.value
+						}
+					},audio: {
+						mandatory: {
+							sourceId: audioList.value
+						}
+					}
+				}, resolve, reject);
+
+				statusDB.set("monitorStatus", "enable", "jfw10973");
+			});
+		}).then(function (stream) {
+			statusDB.set("stream", stream, "jfw10973");
+			videoShow.src = URL.createObjectURL(stream);
+			fn && fn();
+		});
+	}
+
+	function endMonitor () {
+		endCapture();
+		statusDB.get("stream").getVideoTracks()[0].stop();
+		statusDB.set("monitorStatus", "disable", "jfw10973");
+	}
+
+	function startCapture () {
+		// todo canvas解耦
+		var canvas = document.querySelector("#canvas"),
+			capture = document.querySelector(".capture"),
+			videoShow = document.querySelector("#video-show"),
+			timer = null;
+
+		clearInterval(statusDB.get("timer"));
+			timer = setInterval(function () {
+			var imgElement = document.createElement("img");
+			canvas.getContext("2d").drawImage(videoShow, 0, 0, 400, 300);
+			imgElement.src = canvas.toDataURL("image/jpeg", 0.6);
+
+			capture.appendChild(imgElement);
+		}, statusDB.get("interval"));
+		statusDB.set("captureStatus", "enable", "jfw10973");
+		statusDB.set("timer", timer, "jfw10973");
+	}
+
+	function endCapture () {
+		clearInterval(statusDB.get("timer"));
+		statusDB.set("captureStatus", "disable", "jfw10973");
+	}
+
+	function initStatus () {
+		// var PrivateKey = "jfw10973";
+
+		var statusData = {
+			stream: {
+				isPrivate: true,
+				value: null
+			},
+			timer: {
+				isPrivate: true,
+				value: null
+			},
+			monitorStatus: {
+				isPrivate: true,
+				value: null
+			},
+			captureStatus: {
+				isPrivate: true,
+				value: null
+			},
+			interval: {
+				isPrivate: false,
+				value: 1000
+			}
+		};
+
+		function get () {
+			var attr = arguments[0],
+				res;
+
+			res = statusData[attr].value;
+			// res = JSON.parse(JSON.stringify(statusData[attr].value));
+
+			return res;
+		}
+
+		function set () {
+			var attr = arguments[0],
+				value = arguments[1],
+				key = arguments[2],
+				res;
+			// todo 白名单还是黑名单  看整体逻辑
+			if (statusData[attr].isPrivate) {
+				statusData[attr].value = value;
+				res = value;
+			}else if (statusData[attr].isPrivate === false) {
+				statusData[attr].value = value;
+				res = value;
+			}
+		}
+
+		return {
+			//隐藏传参逻辑
+			get: function () {
+				return get.apply(this, arguments);
+			},
+			set: function () {
+				return set.apply(this, arguments);
+			}
+		};
+	}
+
+	var statusDB = initStatus();
+
+	document.addEventListener("DOMContentLoaded", function () {
+		var videoShow = document.querySelector("#video-show"),
+			videoList = document.querySelector("#video-list"),
+			audioList = document.querySelector("#audio-list"),
+			captureSwitch = document.querySelector("#capture-switch"),
+			monitorSwitch = document.querySelector("#monitor-switch");
+
+		startMonitor(videoShow, videoList, audioList, function () {
+			statusDB.set("interval", 1000);
+			startCapture();
+		});
+
+		monitorSwitch.addEventListener("click", function (event) {
+			if (statusDB.get("monitorStatus") == "enable") {
+				endMonitor();
+				event.target.innerText = "start";
+			} else {
+				startMonitor(videoShow, videoList, audioList, function () {
+					statusDB.set("interval", 1000);
+					startCapture();
+				});
+				event.target.innerText = "stop";
+			}
+		}, false);
+
+		captureSwitch.addEventListener("click", function (event) {
+			if (statusDB.get("captureStatus") == "enable") {
+				endCapture();
+				event.target.innerText = "start";
+			} else {
+				startCapture();
+				event.target.innerText = "pause";
+			}
+		}, false);
+	});
+	</script>
+</head>
+<body>
+	<video src="#" id="video-show" autoplay width="400" height="300" muted="true"></video>
+	<canvas id="canvas" width="400" height="300"></canvas>
+	<div class="capture"></div>
+	<label for="monitor-switch">monitor:</label>
+	<button id="monitor-switch">stop</button>
+	<label for="capture-switch">capture:</label>
+	<button id="capture-switch">pause</button>
+	<select name="" id="video-list"></select>
+	<select name="" id="audio-list"></select>
+</body>
+</html>

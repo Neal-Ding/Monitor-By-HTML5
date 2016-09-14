@@ -10,7 +10,7 @@
 		display: none;
 	}
 	.capture{
-		display: none;
+		/*display: none;*/
 	}
 	.capture img{
 		max-width: 100px;
@@ -31,8 +31,7 @@
 				}
 			});
 
-			//todo 需要回溯作用域链
-			return new Promise(function name1 (resolve, reject) {
+			return new Promise(function (resolve, reject) {
 				navigator.webkitGetUserMedia({
 					video: {
 						mandatory: {
@@ -45,10 +44,10 @@
 					}
 				}, resolve, reject);
 
-				statusDB.set("monitorStatus", "enable", "jfw10973");
+				statusDB.set("isMonitor", STATUS_ON);
 			});
 		}).then(function (stream) {
-			statusDB.set("stream", stream, "jfw10973");
+			statusDB.set("stream", stream);
 			videoShow.src = URL.createObjectURL(stream);
 			fn && fn();
 		});
@@ -57,7 +56,7 @@
 	function endMonitor () {
 		endCapture();
 		statusDB.get("stream").getVideoTracks()[0].stop();
-		statusDB.set("monitorStatus", "disable", "jfw10973");
+		statusDB.set("isMonitor", STATUS_OFF);
 	}
 
 	function startCapture () {
@@ -68,25 +67,23 @@
 			timer = null;
 
 		clearInterval(statusDB.get("timer"));
-			timer = setInterval(function () {
+		timer = setInterval(function () {
 			var imgElement = document.createElement("img");
 			canvas.getContext("2d").drawImage(videoShow, 0, 0, 400, 300);
 			imgElement.src = canvas.toDataURL("image/jpeg", 0.6);
 
 			capture.appendChild(imgElement);
 		}, statusDB.get("interval"));
-		statusDB.set("captureStatus", "enable", "jfw10973");
-		statusDB.set("timer", timer, "jfw10973");
+		statusDB.set("isCapture", STATUS_ON);
+		statusDB.set("timer", timer);
 	}
 
 	function endCapture () {
 		clearInterval(statusDB.get("timer"));
-		statusDB.set("captureStatus", "disable", "jfw10973");
+		statusDB.set("isCapture", STATUS_OFF);
 	}
 
-	function initStatus () {
-		// var PrivateKey = "jfw10973";
-
+	function initData () {
 		var statusData = {
 			stream: {
 				isPrivate: true,
@@ -96,28 +93,59 @@
 				isPrivate: true,
 				value: null
 			},
-			monitorStatus: {
-				isPrivate: true,
-				value: null
-			},
-			captureStatus: {
-				isPrivate: true,
-				value: null
-			},
 			interval: {
 				isPrivate: false,
 				value: 1000
+			},
+			isMonitor: {
+				isPrivate: true,
+				value: null
+			},
+			isCapture: {
+				isPrivate: true,
+				value: null
 			}
 		};
 
+		var watchData = {};
+
+		//todo 作用域回溯，promise问题
+		function getChain (args, chain) {
+			var chain = chain || [];
+
+			if (args.caller !== null) {
+				chain.push(args.caller.name);
+				return getChain(args.caller, chain);
+			}
+
+			console.log(chain) //chain;
+		}
+
+		function getType (param) {
+			return Object.prototype.toString.call(param);
+		}
+
 		function get () {
 			var attr = arguments[0],
-				res;
+				res = statusData[attr].value;
 
-			res = statusData[attr].value;
-			// res = JSON.parse(JSON.stringify(statusData[attr].value));
+			if (getType(res) === "[object Function]") {
+				res = new Function (res.toString());
+			} else if (getType(res) === "[object Object]" || getType(res) === "[object Array]") {
+				res = JSON.parse(JSON.stringify(res));
+			}
 
 			return res;
+		}
+
+		function watch (attr, value, callback) {
+			if (statusData[attr] === value) {
+				callback && callback();
+			}
+		}
+
+		function unwatch (watchID) {
+			delete watchData[watchID];
 		}
 
 		function set () {
@@ -125,28 +153,40 @@
 				value = arguments[1],
 				key = arguments[2],
 				res;
-			// todo 白名单还是黑名单  看整体逻辑
-			if (statusData[attr].isPrivate) {
+
+			if (statusData[attr].isPrivate === false) {
 				statusData[attr].value = value;
 				res = value;
-			}else if (statusData[attr].isPrivate === false) {
+				//todo 权限区分
+			} else if (statusData[attr].isPrivate) {
 				statusData[attr].value = value;
 				res = value;
 			}
+
+			//todo promise无法上溯
+			var chain = getChain(arguments.callee);
+			console.log(chain);
 		}
 
 		return {
-			//隐藏传参逻辑
 			get: function () {
 				return get.apply(this, arguments);
 			},
 			set: function () {
 				return set.apply(this, arguments);
+			},
+			watch: function () {
+				return watch.apply(this, arguments);
+			},
+			unwatch: function () {
+				return unwatch.apply(this, arguments);
 			}
 		};
 	}
 
-	var statusDB = initStatus();
+	const STATUS_ON = "Enable",
+		  STATUS_OFF = "Disable";
+	var statusDB = initData();
 
 	document.addEventListener("DOMContentLoaded", function () {
 		var videoShow = document.querySelector("#video-show"),
@@ -155,32 +195,31 @@
 			captureSwitch = document.querySelector("#capture-switch"),
 			monitorSwitch = document.querySelector("#monitor-switch");
 
+
 		startMonitor(videoShow, videoList, audioList, function () {
-			statusDB.set("interval", 1000);
 			startCapture();
 		});
 
 		monitorSwitch.addEventListener("click", function (event) {
-			if (statusDB.get("monitorStatus") == "enable") {
+			var isMonitor = statusDB.get("isMonitor");
+			if (isMonitor == STATUS_ON) {
 				endMonitor();
-				event.target.innerText = "start";
-			} else {
+			} else if (isMonitor == STATUS_OFF){
 				startMonitor(videoShow, videoList, audioList, function () {
-					statusDB.set("interval", 1000);
 					startCapture();
 				});
-				event.target.innerText = "stop";
 			}
+			event.target.innerText = isMonitor;
 		}, false);
 
 		captureSwitch.addEventListener("click", function (event) {
-			if (statusDB.get("captureStatus") == "enable") {
+			var isCapture = statusDB.get("isCapture");
+			if (isCapture == STATUS_ON) {
 				endCapture();
-				event.target.innerText = "start";
-			} else {
+			} else if (isCapture == STATUS_OFF) {
 				startCapture();
-				event.target.innerText = "pause";
 			}
+			event.target.innerText = isCapture;
 		}, false);
 	});
 	</script>
